@@ -1,0 +1,25 @@
+rubrics:
+  - id: 1
+    type: f2p
+    text: "候选快照同时记录 driver 统计、diff 大小、quota 与校验信息。"
+  - id: 2
+    type: f2p
+    text: "层和镜像索引在同一确认代际中彼此匹配，引用和大小校验失败不会发布。"
+  - id: 3
+    type: f2p
+    text: "任一 metadata 写入、锁替换或同步失败时上一份完整快照仍可读取。"
+  - id: 4
+    type: f2p
+    text: "进程在写入或发布中止后启动会确定地完成或清理候选，不留下半代际文件。"
+  - id: 5
+    type: f2p
+    text: "重复刷新不会回退较新的统计，也不会重复推进清理依据。"
+  - id: 6
+    type: f2p
+    text: "状态查询只读取已确认代际，不能混合内存候选与磁盘旧值。"
+  - id: 7
+    type: p2p
+    text: "旧 metadata、只读检查与 quota 未启用路径保持兼容。"
+  - id: 8
+    type: p2p
+    text: "正常 diff、status 和加载流程不发生回归。"

@@ -1,0 +1,19 @@
+项目标识：containers-storage-2f07ecc1-5f34-4d53-8590-932cb61c06f5
+Harness：Trae｜有效轮数：198｜syncRevision：42
+Session：586499748533644
+会话时长：5511 秒｜是否超过两小时：否
+完成度结论：部分完成
+收录规则结果：收录：长程题
+复现验证：stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。
+轨迹证据：采集阶段保存的当前 Session 轨迹与 count-trae-cn-steps.py 统计一致。
+Prompt-Rubric：Prompt-Rubric 对齐表：P1 记录 driver 统计、diff 大小、quota 和校验 → R1；P2 层索引、镜像索引和锁文件同代发布 → R2；P3 写入、同步或中止保留完整旧快照并启动恢复 → R3-R4；P4 重复刷新、旧 metadata、只读检查和未启用 quota 兼容 → R5-R8。无额外验收要求。
+未通过 Rubric：2
+
+Rubric ID：1｜状态：通过｜期望行为：候选快照同时记录 driver 统计、diff 大小、quota 与校验信息。｜实际观察：代码路径实现了该行为；stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。｜直接证据：stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。
+Rubric ID：2｜状态：未通过｜期望行为：层和镜像索引在同一确认代际中彼此匹配，引用和大小校验失败不会发布。｜实际观察：层索引与镜像索引的统计代际没有检查新建镜像的代际标记；statisticsUnchanged 只检查层字段，刷新后新建镜像保持空的 StatsGeneration。｜直接证据：stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。 代码审计定位到该确定行为。｜原因：层索引与镜像索引的统计代际没有检查新建镜像的代际标记；statisticsUnchanged 只检查层字段，刷新后新建镜像保持空的 StatsGeneration。｜影响：该条 Rubric 的失败行为会破坏题目要求的状态一致性或失败恢复边界｜证据位置：containers-storage-2f07ecc1-5f34-4d53-8590-932cb61c06f5 对应项目代码与一次运行验证
+Rubric ID：3｜状态：通过｜期望行为：任一 metadata 写入、锁替换或同步失败时上一份完整快照仍可读取。｜实际观察：代码路径实现了该行为；stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。｜直接证据：stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。
+Rubric ID：4｜状态：通过｜期望行为：进程在写入或发布中止后启动会确定地完成或清理候选，不留下半代际文件。｜实际观察：代码路径实现了该行为；stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。｜直接证据：stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。
+Rubric ID：5｜状态：通过｜期望行为：重复刷新不会回退较新的统计，也不会重复推进清理依据。｜实际观察：代码路径实现了该行为；stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。｜直接证据：stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。
+Rubric ID：6｜状态：通过｜期望行为：状态查询只读取已确认代际，不能混合内存候选与磁盘旧值。｜实际观察：代码路径实现了该行为；stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。｜直接证据：stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。
+Rubric ID：7｜状态：通过｜期望行为：旧 metadata、只读检查与 quota 未启用路径保持兼容。｜实际观察：代码路径实现了该行为；stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。｜直接证据：stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。
+Rubric ID：8｜状态：通过｜期望行为：正常 diff、status 和加载流程不发生回归。｜实际观察：代码路径实现了该行为；stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。｜直接证据：stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。

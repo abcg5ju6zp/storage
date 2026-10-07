@@ -94,6 +94,13 @@ type Image struct {
 	ReadOnly bool `json:"-"`
 
 	Flags map[string]any `json:"flags,omitempty"`
+
+	// StatsGeneration names the statistics generation in which the image
+	// index was last published together with the layer index by
+	// Store.RefreshLayerStatistics().  An empty value means that the
+	// image predates statistics generations.  It is only ever used to tie
+	// the image index to the same generation as the layer index.
+	StatsGeneration string `json:"stats-generation,omitempty"`
 }
 
 // roImageStore provides bookkeeping for information about Images.
@@ -194,6 +201,7 @@ func copyImage(i *Image) *Image {
 		Created:         i.Created,
 		ReadOnly:        i.ReadOnly,
 		Flags:           copyMapPreferringNil(i.Flags),
+		StatsGeneration: i.StatsGeneration,
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -396,6 +397,20 @@ type Store interface {
 	// LayerSize returns a cached approximation of the layer's size, or -1
 	// if we don't have a value on hand.
 	LayerSize(id string) (int64, error)
+
+	// RefreshLayerStatistics recomputes on-disk usage, diff sizes, quota
+	// usage and filesystem capacity for the store's layers, validates the
+	// consistency of the layer graph and the image index, and publishes the
+	// refreshed layer and image indexes as a single crash-safe generation.
+	// Statistics are collected in a candidate snapshot before any index or
+	// lock file is modified; a failed, interrupted or superseded refresh
+	// always leaves the previous complete generation readable.
+	RefreshLayerStatistics() (*LayerStatisticsReport, error)
+
+	// LayerStatistics returns the statistics of the last fully committed
+	// generation, or (nil, nil) if none has ever been committed.  It never
+	// exposes candidate snapshot data.
+	LayerStatistics() (*LayerStatisticsReport, error)
 
 	// LayerParentOwners returns the UIDs and GIDs of owners of parents of
 	// the layer's mountpoint for which the layer's UID and GID maps (if
@@ -986,6 +1001,17 @@ func (s *store) load() error {
 	gipath := filepath.Join(imgStoreRoot, driverPrefix+"images")
 	if err := os.MkdirAll(gipath, 0o700); err != nil {
 		return err
+	}
+	// Before any index is opened, resolve a statistics generation that a
+	// previous process may have left prepared or half-published.  This
+	// either completes the unique candidate or removes it, so the layer and
+	// image indexes loaded below never mix two generations.
+	glpath := filepath.Join(s.graphRoot, driverPrefix+"layers")
+	if err := os.MkdirAll(glpath, 0o700); err != nil {
+		return err
+	}
+	if err := recoverStatisticsSnapshots(glpath, gipath); err != nil {
+		return fmt.Errorf("recovering layer statistics generation: %w", err)
 	}
 	imageStore, err := newImageStore(gipath)
 	if err != nil {
@@ -2839,7 +2865,26 @@ func (s *store) Status() ([][2]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return rlstore.Status()
+	status, err := rlstore.Status()
+	if err != nil {
+		return nil, err
+	}
+	// Surface only the fully committed statistics generation; candidate
+	// snapshots are never observable through status queries.  Missing
+	// generations simply add no entries.
+	report, err := s.LayerStatistics()
+	if err != nil {
+		return nil, err
+	}
+	if report != nil {
+		status = append(status,
+			[2]string{"Layer Statistics Generation", report.Generation},
+			[2]string{"Layer Statistics Updated", report.CreatedAt.Format(time.RFC3339)},
+			[2]string{"Filesystem Total Bytes", strconv.FormatInt(report.Filesystem.TotalBytes, 10)},
+			[2]string{"Filesystem Available Bytes", strconv.FormatInt(report.Filesystem.AvailableBytes, 10)},
+		)
+	}
+	return status, nil
 }
 
 //go:embed VERSION

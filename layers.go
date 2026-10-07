@@ -181,6 +181,42 @@ type Layer struct {
 	// convenience of the caller.  They can be large, and are only in
 	// memory when being read from or written to disk.
 	BigDataNames []string `json:"big-data-names,omitempty"`
+
+	// The following fields are maintained exclusively by
+	// Store.RefreshLayerStatistics(), and describe the layer as it was
+	// observed in the statistics generation named by StatsGeneration.
+	// All of them, together with the image index' generation marker,
+	// are published as a single crash-safe generation; a zero value (or
+	// an empty StatsGeneration) means that no statistics have ever been
+	// committed for the layer.  These fields are optional and are never
+	// required for normal layer operations, so metadata written by older
+	// versions of the library remains valid.
+
+	// StatsGeneration is the identifier of the statistics generation in
+	// which the layer's Stats* values were published.
+	StatsGeneration string `json:"stats-generation,omitempty"`
+
+	// StatsAt is the timestamp at which the layer's statistics were
+	// collected.
+	StatsAt time.Time `json:"stats-at,omitempty"`
+
+	// StatsSize is the on-disk size, in bytes, of the layer's writable
+	// directory, as reported by the graph driver.  When the driver uses
+	// filesystem quota, the value is obtained from quota tracking.
+	StatsSize int64 `json:"stats-size,omitempty"`
+
+	// StatsInodes is the number of inodes used by the layer's writable
+	// directory, as reported by the graph driver.
+	StatsInodes int64 `json:"stats-inodes,omitempty"`
+
+	// StatsDiffSize is the size, in bytes, of the tarstream describing
+	// the layer's contents relative to its parent, as reported by the
+	// graph driver's DiffSize.
+	StatsDiffSize int64 `json:"stats-diff-size,omitempty"`
+
+	// StatsQuotaEnabled is true if the StatsSize/StatsInodes values were
+	// tracked through filesystem quota rather than a directory walk.
+	StatsQuotaEnabled bool `json:"stats-quota-enabled,omitempty"`
 }
 
 type layerMountPoint struct {
@@ -470,6 +506,12 @@ func copyLayer(l *Layer) *Layer {
 		GIDMap:             copySlicePreferringNil(l.GIDMap),
 		UIDs:               copySlicePreferringNil(l.UIDs),
 		GIDs:               copySlicePreferringNil(l.GIDs),
+		StatsGeneration:    l.StatsGeneration,
+		StatsAt:            l.StatsAt,
+		StatsSize:          l.StatsSize,
+		StatsInodes:        l.StatsInodes,
+		StatsDiffSize:      l.StatsDiffSize,
+		StatsQuotaEnabled:  l.StatsQuotaEnabled,
 	}
 }
 

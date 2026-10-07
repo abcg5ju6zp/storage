@@ -14,3 +14,10 @@ import (
 func (d *Driver) ReadWriteDiskUsage(id string) (*directory.DiskUsage, error) {
 	return directory.Usage(path.Join(d.dir(id), "diff"))
 }
+
+// ProjectQuotaSupported reports whether the driver obtains disk usage
+// statistics through filesystem project quota tracking, rather than by
+// walking the layer directory.
+func (d *Driver) ProjectQuotaSupported() bool {
+	return false
+}
