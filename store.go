@@ -291,6 +291,16 @@ type Store interface {
 	// layer does not, an error will be returned.
 	DeleteContainer(id string) error
 
+	// CleanupContainers removes a batch of (typically exited) containers
+	// and, optionally, the images and layers that become unreferenced as a
+	// result. The operation is driven by a persisted journal and proceeds in
+	// dependency order (containers, then images, then mounts, then layer
+	// index entries, then driver directories): if the process is killed or
+	// any step fails, still-referenced content is preserved and the next
+	// invocation (or the next store open) resumes from the journal without
+	// deleting anything twice or resurrecting removed references.
+	CleanupContainers(options CleanupContainersOptions) (CleanupReport, error)
+
 	// Wipe removes all known layers, images, and containers.
 	Wipe() error
 
@@ -911,6 +921,13 @@ func GetStore(options types.StoreOptions) (Store, error) {
 	}
 	if err := s.load(); err != nil {
 		return nil, err
+	}
+
+	// Best-effort continuation of a batch cleanup interrupted by a crash
+	// or a failed step. Never fail store construction because of this:
+	// the journal stays on disk and the next cleanup resumes it.
+	if err := s.resumePendingCleanup(); err != nil {
+		logrus.Warnf("Resuming interrupted storage cleanup: %v", err)
 	}
 
 	stores = append(stores, s)

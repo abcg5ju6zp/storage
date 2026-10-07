@@ -1,0 +1,5 @@
+{
+  "completion": "完成",
+  "fails": {},
+  "evidence": "cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。"
+}

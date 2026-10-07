@@ -1,0 +1,19 @@
+项目标识：containers-storage-239b5cd2-a6cc-42fe-8345-5ca73de833b0
+Harness：Trae｜有效轮数：88｜syncRevision：35
+Session：586499748533644
+会话时长：3101 秒｜是否超过两小时：否
+完成度结论：完成
+收录规则结果：不收录
+复现验证：cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。
+轨迹证据：采集阶段保存的当前 Session 轨迹与 count-trae-cn-steps.py 统计一致。
+Prompt-Rubric：Prompt-Rubric 对齐表：P1 清理前保存容器、镜像、挂载、层索引和驱动目录引用快照 → R1；P2 按容器、镜像、挂载、层索引、驱动目录依赖顺序清理 → R2；P3 失败或中止保留引用并持久化清理意图 → R3-R4；P4 并发创建、挂载、删除收敛到同一层世代 → R5；P5 读取不暴露半删除元数据且既有路径兼容 → R6-R8。无额外验收要求。
+未通过 Rubric：无
+
+Rubric ID：1｜状态：通过｜期望行为：删除前记录容器、镜像与层的完整引用快照，仍被引用的层不会进入清理。｜实际观察：代码路径实现了该行为；cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。｜直接证据：cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。
+Rubric ID：2｜状态：通过｜期望行为：撤销容器和镜像引用后才卸载并删除层目录，依赖顺序可重复执行。｜实际观察：代码路径实现了该行为；cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。｜直接证据：cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。
+Rubric ID：3｜状态：通过｜期望行为：卸载、索引写入或目录删除失败时保留上一份可读状态并留下可继续处理的意图。｜实际观察：代码路径实现了该行为；cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。｜直接证据：cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。
+Rubric ID：4｜状态：通过｜期望行为：进程在任一步骤中止后重启会继续未完成步骤，不会重复删除已确认对象或复活旧引用。｜实际观察：代码路径实现了该行为；cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。｜直接证据：cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。
+Rubric ID：5｜状态：通过｜期望行为：并发创建、挂载和删除同一层时最终只有一个一致层世代对读路径可见。｜实际观察：代码路径实现了该行为；cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。｜直接证据：cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。
+Rubric ID：6｜状态：通过｜期望行为：镜像、容器和层查询不会返回半删除元数据或指向不存在目录的条目。｜实际观察：代码路径实现了该行为；cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。｜直接证据：cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。
+Rubric ID：7｜状态：通过｜期望行为：只读存储、overlay 复用、锁定容器和既有崩溃恢复语义保持通过。｜实际观察：代码路径实现了该行为；cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。｜直接证据：cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。
+Rubric ID：8｜状态：通过｜期望行为：未触发清理的普通创建、挂载和删除仍保持原有结果。｜实际观察：代码路径实现了该行为；cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。｜直接证据：cleanup.go 的 plan、phaseContainers、phaseImages、phaseMounts、phaseLayerIndex 和 phaseDriverDirectories；go test -count=1 -run TestCleanup . 通过。

@@ -40,8 +40,14 @@ import (
 const (
 	tarSplitSuffix = ".tar-split.gz"
 	// tempDirPath is the subdirectory name used for storing temporary directories during layer deletion
-	tempDirPath    = "tmp"
-	incompleteFlag = "incomplete"
+	tempDirPath = "tmp"
+	// generationsJSONName is the name of the file in which the persistent
+	// per-layer creation generations are recorded.  The file is the epoch
+	// fence used by recoverable batch cleanup to distinguish a layer that is
+	// still missing after an interrupted deletion from a layer that was
+	// re-created (in a newer generation) after the deletion was scheduled.
+	generationsJSONName = "generations.json"
+	incompleteFlag      = "incomplete"
 	// maxLayerStoreCleanupIterations is the number of times we try to clean up inconsistent layer store state
 	// in readers (which, for implementation reasons, gives other writers the opportunity to create more inconsistent state)
 	// until we just give up.
@@ -302,6 +308,19 @@ type rwLayerStore interface {
 	// Caller MUST call all returned cleanup functions outside of the locks.
 	deferredDelete(id string) ([]tempdir.CleanupTempDirFunc, error)
 
+	// layerGeneration returns the creation generation recorded for a layer
+	// ID (0 if the layer has never been registered in this store). It is an
+	// epoch fence for recoverable batch cleanup: if the value changes after
+	// a deletion was scheduled, the ID now belongs to a newer layer
+	// generation and the old deletion intent must not be resumed against it.
+	layerGeneration(id string) uint64
+
+	// bumpLayerGeneration records a new creation generation for a layer ID
+	// and persists it. It must be called while holding the store for
+	// writing, as part of the same critical section which publishes a newly
+	// created layer.
+	bumpLayerGeneration(id string) (uint64, error)
+
 	// Wipe deletes all layers.
 	Wipe() error
 
@@ -440,6 +459,13 @@ type layerStore struct {
 	byuncompressedsum   map[digest.Digest][]string
 	bytocsum            map[digest.Digest][]string
 	layerspathsModified [numLayerLocationIndex]time.Time
+
+	// layerGenerations records the creation generation of layers registered
+	// in this store. Entries for deleted layers are intentionally kept so
+	// that the value can serve as an epoch fence for recoverable batch
+	// cleanup across restarts. Guarded by inProcessLock, persisted in
+	// generations.json when the store is read-write.
+	layerGenerations map[string]uint64
 
 	// FIXME: This field is only set when constructing layerStore, but locking rules of the driver
 	// interface itself are not documented here.
@@ -812,6 +838,9 @@ func (r *layerStore) load(lockedForWriting bool) (bool, error) {
 				return false, err
 			}
 		}
+		if err := r.loadLayerGenerations(); err != nil {
+			return false, err
+		}
 	}
 
 	for locationIndex := range numLayerLocationIndex {
@@ -1038,6 +1067,99 @@ func (r *layerStore) save(saveLocations layerLocations) error {
 // The caller must hold r.inProcessLock for WRITING.
 func (r *layerStore) saveFor(modifiedLayer *Layer) error {
 	return r.save(modifiedLayer.location)
+}
+
+func (r *layerStore) generationsPath() string {
+	return filepath.Join(r.layerdir, generationsJSONName)
+}
+
+// layerGeneration is the read accessor for the persistent layer generation
+// fence. The caller must hold r.inProcessLock for reading or writing.
+func (r *layerStore) layerGeneration(id string) uint64 {
+	if r.layerGenerations == nil {
+		return 0
+	}
+	return r.layerGenerations[id]
+}
+
+// bumpLayerGeneration records that a layer with the specified ID is being
+// (re-)created in a new generation and persists the generation state. It
+// must be called while holding the store for writing, before the caller
+// publishes the new layer metadata with saveFor(): if this write fails, the
+// caller must abort layer creation (its usual error cleanup deletes the
+// incomplete layer), so that a scheduled cleanup can never mistake the new
+// generation for the layer it was told to delete.
+func (r *layerStore) bumpLayerGeneration(id string) (uint64, error) {
+	if !r.lockfile.IsReadWrite() {
+		return 0, fmt.Errorf("not allowed to record layer generations at %q: %w", r.layerdir, ErrStoreIsReadOnly)
+	}
+	if r.layerGenerations == nil {
+		r.layerGenerations = make(map[string]uint64)
+	}
+	generation := r.layerGenerations[id] + 1
+	r.layerGenerations[id] = generation
+	if err := r.saveLayerGenerations(); err != nil {
+		delete(r.layerGenerations, id)
+		// Restore the previous value instead of leaving the increment in
+		// memory only, so a later in-process decision cannot be based on a
+		// generation that was never made durable.
+		if generation > 1 {
+			r.layerGenerations[id] = generation - 1
+		}
+		return 0, err
+	}
+	return generation, nil
+}
+
+// loadLayerGenerations reloads the persistent layer generation fence from
+// disk. A missing file (stores created before this mechanism existed) is
+// normal and starts the fence at zero. The caller must hold the lockfile
+// for writing and r.inProcessLock for writing.
+func (r *layerStore) loadLayerGenerations() error {
+	generationState := struct {
+		Layers map[string]uint64 `json:"layers"`
+	}{}
+	data, err := os.ReadFile(r.generationsPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			r.layerGenerations = map[string]uint64{}
+			return nil
+		}
+		return err
+	}
+	if len(data) != 0 {
+		if err := json.Unmarshal(data, &generationState); err != nil {
+			return fmt.Errorf("loading %q: %w", r.generationsPath(), err)
+		}
+	}
+	if generationState.Layers == nil {
+		generationState.Layers = map[string]uint64{}
+	}
+	r.layerGenerations = generationState.Layers
+	return nil
+}
+
+// saveLayerGenerations atomically persists the layer generation fence. The
+// caller must hold the lockfile for writing and r.inProcessLock for
+// writing. The write is ordered before the corresponding layer metadata
+// save (saveFor) by callers, so a process that observes a published layer
+// is guaranteed to observe its generation.
+func (r *layerStore) saveLayerGenerations() error {
+	if !r.lockfile.IsReadWrite() {
+		return fmt.Errorf("not allowed to modify the layer store at %q: %w", r.layerdir, ErrStoreIsReadOnly)
+	}
+	r.lockfile.AssertLockedForWriting()
+	if err := os.MkdirAll(r.layerdir, 0o700); err != nil {
+		return err
+	}
+	generationState := struct {
+		Layers map[string]uint64 `json:"layers"`
+	}{Layers: r.layerGenerations}
+	data, err := json.Marshal(&generationState)
+	if err != nil {
+		return err
+	}
+	return ioutils.AtomicWriteFile(r.generationsPath(), data, 0o600)
 }
 
 // The caller must hold r.lockfile locked for writing.
@@ -1358,6 +1480,12 @@ func (r *layerStore) PutAdditionalLayer(id string, parentLayer *Layer, names []s
 	if layer.TOCDigest != "" {
 		r.bytocsum[layer.TOCDigest] = append(r.bytocsum[layer.TOCDigest], layer.ID)
 	}
+	if _, err := r.bumpLayerGeneration(id); err != nil {
+		if e := r.deleteWhileHoldingLock(layer.ID); e != nil {
+			logrus.Errorf("While recovering from a failure to record the layer generation, error deleting layer %#v: %v", id, e)
+		}
+		return nil, err
+	}
 	if err := r.saveFor(layer); err != nil {
 		if e := r.deleteWhileHoldingLock(layer.ID); e != nil {
 			logrus.Errorf("While recovering from a failure to save layers, error deleting layer %#v: %v", id, e)
@@ -1594,6 +1722,15 @@ func (r *layerStore) create(id string, parentLayer *Layer, names []string, mount
 		}
 	}
 
+	// Record the layer's creation generation before publishing it: any
+	// cleanup that snapshots references after this point must see a
+	// generation different from any earlier (deleted) generation of the
+	// same ID, and an interrupted creation rolls the layer back while
+	// leaving the advanced generation harmlessly unused.
+	if _, err = r.bumpLayerGeneration(id); err != nil {
+		cleanupFailureContext = "recording layer generation"
+		return nil, -1, err
+	}
 	delete(layer.Flags, incompleteFlag)
 	if err = r.saveFor(layer); err != nil {
 		cleanupFailureContext = "saving finished layer metadata"
@@ -2106,6 +2243,13 @@ func (r *layerStore) Wipe() error {
 		if err := r.driver.Remove(id); err != nil {
 			return err
 		}
+	}
+	// All layers are gone, so the generation fence must start over too;
+	// otherwise the first layer created after a wipe would look like a
+	// newer-generation re-creation of an ID that no longer exists.
+	r.layerGenerations = map[string]uint64{}
+	if err := os.Remove(r.generationsPath()); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	return nil
 }
