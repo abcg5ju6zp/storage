@@ -1622,11 +1622,10 @@ func (r *layerStore) Mounted(id string) (int, error) {
 
 // Requires startWriting.
 func (r *layerStore) Mount(id string, options drivers.MountOpts) (string, error) {
-	// LOCKING BUG: This is reachable via store.Diff → layerStore.Diff → layerStore.newFileGetter
-	// (with btrfs and zfs graph drivers) holding layerStore only locked for reading, while it modifies
-	// - r.layers[].MountCount (directly and via loadMounts / saveMounts)
-	// - r.layers[].MountPoint (directly and via loadMounts / saveMounts)
-	// - r.bymount (via loadMounts / saveMounts)
+	// This modifies the in-memory and on-disk mount records
+	// (r.layers[].MountCount/MountPoint, r.bymount and mountpoints.json), so it must only run
+	// with the store locked for writing. Read-only Diff reads do not go through here, they take
+	// a private driver.Get() reference in layerStore.newFileGetter instead.
 
 	// You are not allowed to mount layers from readonly stores if they
 	// are not mounted read/only.
@@ -1679,11 +1678,10 @@ func (r *layerStore) Mount(id string, options drivers.MountOpts) (string, error)
 
 // Requires startWriting.
 func (r *layerStore) unmount(id string, force bool, conditional bool) (bool, error) {
-	// LOCKING BUG: This is reachable via store.Diff → layerStore.Diff → layerStore.newFileGetter → simpleGetCloser.Close()
-	// (with btrfs and zfs graph drivers) holding layerStore only locked for reading, while it modifies
-	// - r.layers[].MountCount (directly and via loadMounts / saveMounts)
-	// - r.layers[].MountPoint (directly and via loadMounts / saveMounts)
-	// - r.bymount (via loadMounts / saveMounts)
+	// Counterpart of Mount(): releases one of the store-recorded mount references and modifies
+	// r.layers[].MountCount/MountPoint, r.bymount and mountpoints.json, so it requires the store
+	// locked for writing. Diff reads never take such references; they release their private
+	// driver.Get() reference directly through driver.Put().
 
 	if !r.lockfile.IsReadWrite() {
 		return false, fmt.Errorf("not allowed to update mount locations for layers at %q: %w", r.mountspath(), ErrStoreIsReadOnly)
@@ -2155,26 +2153,50 @@ func (r *layerStore) Changes(from, to string) ([]archive.Change, error) {
 	return r.driver.Changes(to, r.layerMappings(toLayer), from, r.layerMappings(fromLayer), toLayer.MountLabel)
 }
 
-type simpleGetCloser struct {
-	r    *layerStore
-	path string
-	id   string
+// driverBackedFileGetter is a drivers.FileGetCloser for graph drivers that do not implement
+// drivers.DiffGetterDriver (currently btrfs and zfs).
+//
+// It holds exactly ONE read-only driver.Get() reference, which Close() releases with a single
+// matching driver.Put(); those driver calls rely only on the driver's own synchronization
+// (see NaiveDiffDriver.Diff, which does the very same thing).
+//
+// Crucially it never touches layerStore mount state (Layer.MountCount/MountPoint, r.bymount or
+// mountpoints.json), so it can be used while the layerStore is locked only for reading and even
+// on read-only stores, and multiple goroutines/processes can hold their own getters at the same
+// time. Every Diff owns a private instance, so concurrent Diffs, cancellation, read errors and
+// stream closes each release only their own reference: a failure can not lose mount references
+// recorded by other users (e.g. a container mounted through layerStore.Mount), no stale mount
+// record is left behind, and a failed Diff can simply be retried.
+type driverBackedFileGetter struct {
+	driver drivers.Driver
+	id     string
+	dir    string
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
-func (s *simpleGetCloser) Get(path string) (io.ReadCloser, error) {
-	return os.Open(filepath.Join(s.path, path))
+func (g *driverBackedFileGetter) Get(path string) (io.ReadCloser, error) {
+	return os.Open(filepath.Join(g.dir, path))
 }
 
-// LOCKING BUG: See the comments in layerStore.Diff
-func (s *simpleGetCloser) Close() error {
-	_, err := s.r.unmount(s.id, false, false)
-	return err
+func (g *driverBackedFileGetter) Close() error {
+	// Make cancellation, read errors and (possibly duplicated) stream Close()s release the
+	// single driver reference exactly once.
+	g.closeOnce.Do(func() {
+		g.closeErr = g.driver.Put(g.id)
+	})
+	return g.closeErr
 }
 
-// LOCKING BUG: See the comments in layerStore.Diff
-func (r *layerStore) newFileGetter(id string) (drivers.FileGetCloser, error) {
+// Requires startReading or startWriting; layer must be a private snapshot (see layerStore.Diff).
+//
+// The driver.Get() fallback below does not modify any layerStore state, so it does not require
+// startWriting and works on read-only stores: the read lock neither has to be upgraded nor to
+// be released (driver.Get/driver.Put are self-synchronizing, exactly like in NaiveDiffDriver).
+func (r *layerStore) newFileGetter(layer *Layer) (drivers.FileGetCloser, error) {
 	if getter, ok := r.driver.(drivers.DiffGetterDriver); ok {
-		fgc, err := getter.DiffGetter(id)
+		fgc, err := getter.DiffGetter(layer.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -2183,14 +2205,21 @@ func (r *layerStore) newFileGetter(id string) (drivers.FileGetCloser, error) {
 		}
 	}
 
-	path, err := r.Mount(id, drivers.MountOpts{Options: []string{"ro"}})
+	// The driver cannot open individual files directly (btrfs, zfs): take a private
+	// read-only reference straight from the driver instead of going through layerStore.Mount().
+	// Diff reads must not share/modify the store-managed mount reference counts, nor take the
+	// mounts write lock, while the layerStore may be locked for reading only (or be read-only).
+	dir, err := r.driver.Get(layer.ID, drivers.MountOpts{
+		MountLabel: layer.MountLabel,
+		Options:    []string{"ro"},
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &simpleGetCloser{
-		r:    r,
-		path: path,
-		id:   id,
+	return &driverBackedFileGetter{
+		driver: r.driver,
+		id:     layer.ID,
+		dir:    dir,
 	}, nil
 }
 
@@ -2223,9 +2252,20 @@ func (r *layerStore) Diff(from, to string, options *DiffOptions) (io.ReadCloser,
 	if err != nil {
 		return nil, ErrLayerUnknown
 	}
+	// startReading()/startWriting() above just made the store reflect the latest on-disk state
+	// (including cross-process updates). Take short-lived private snapshots of the layer records
+	// we need while they are fresh. Everything below, including the whole lifetime of the
+	// returned stream, uses only these copies: the live r.layers entries they come from may be
+	// reset or replaced by a concurrent reload (see load/loadMounts) at any time, and Diff
+	// itself must never mutate them.
+	toLayerSnapshot := copyLayer(toLayer)
+	var fromLayerSnapshot *Layer
+	if fromLayer != nil {
+		fromLayerSnapshot = copyLayer(fromLayer)
+	}
 	// Default to applying the type of compression that we noted was used
 	// for the layerdiff when it was applied.
-	compression := toLayer.CompressionType
+	compression := toLayerSnapshot.CompressionType
 	// If a particular compression type (or no compression) was selected,
 	// use that instead.
 	if options != nil && options.Compression != nil {
@@ -2251,8 +2291,8 @@ func (r *layerStore) Diff(from, to string, options *DiffOptions) (io.ReadCloser,
 		return preader, nil
 	}
 
-	if from != toLayer.Parent {
-		diff, err := r.driver.Diff(to, r.layerMappings(toLayer), from, r.layerMappings(fromLayer), toLayer.MountLabel)
+	if from != toLayerSnapshot.Parent {
+		diff, err := r.driver.Diff(to, r.layerMappings(toLayerSnapshot), from, r.layerMappings(fromLayerSnapshot), toLayerSnapshot.MountLabel)
 		if err != nil {
 			return nil, err
 		}
@@ -2310,7 +2350,7 @@ func (r *layerStore) Diff(from, to string, options *DiffOptions) (io.ReadCloser,
 		if !os.IsNotExist(err) {
 			return nil, err
 		}
-		diff, err := r.driver.Diff(to, r.layerMappings(toLayer), from, r.layerMappings(fromLayer), toLayer.MountLabel)
+		diff, err := r.driver.Diff(to, r.layerMappings(toLayerSnapshot), from, r.layerMappings(fromLayerSnapshot), toLayerSnapshot.MountLabel)
 		if err != nil {
 			return nil, err
 		}
@@ -2327,9 +2367,11 @@ func (r *layerStore) Diff(from, to string, options *DiffOptions) (io.ReadCloser,
 
 	metadata = storage.NewJSONUnpacker(decompressor)
 
-	// LOCKING BUG: With btrfs and zfs graph drivers), this uses r.Mount() and r.unmount() holding layerStore only locked for reading
-	// but they modify in-memory state.
-	fgetter, err := r.newFileGetter(to)
+	// With btrfs and zfs graph drivers the file-getter holds a PRIVATE read-only driver.Get()
+	// reference (see driverBackedFileGetter/newFileGetter): it neither modifies layerStore mount
+	// state nor needs the store locked for writing, so it is safe under startReading(), on
+	// read-only stores, and in concurrent/cross-process Diff invocations.
+	fgetter, err := r.newFileGetter(toLayerSnapshot)
 	if err != nil {
 		errs := fmt.Errorf("creating file-getter: %w", err)
 		if err := decompressor.Close(); err != nil {
@@ -2340,6 +2382,17 @@ func (r *layerStore) Diff(from, to string, options *DiffOptions) (io.ReadCloser,
 		}
 		return nil, errs
 	}
+	// If we fail (or get cancelled) before handing the stream to the caller, release only our
+	// own driver reference; it must not leak and it must not touch references of other users.
+	// The returned ReadCloser takes over ownership below, and Close() is idempotent.
+	committed := false
+	defer func() {
+		if !committed {
+			if err := fgetter.Close(); err != nil {
+				logrus.Debugf("closing file-getter after a failed Diff setup: %v", err)
+			}
+		}
+	}()
 
 	tarstream := asm.NewOutputTarStream(fgetter, metadata)
 	rc := ioutils.NewReadCloserWrapper(tarstream, func() error {
@@ -2353,6 +2406,8 @@ func (r *layerStore) Diff(from, to string, options *DiffOptions) (io.ReadCloser,
 		if err := tarstream.Close(); err != nil {
 			errs = errors.Join(errs, fmt.Errorf("closing reconstructed tarstream: %w", err))
 		}
+		// Release our private driver reference exactly once: normal end of stream, read errors
+		// and cancellation all converge here, and repeated Close() calls are harmless.
 		if err := fgetter.Close(); err != nil {
 			errs = errors.Join(errs, fmt.Errorf("closing file-getter: %w", err))
 		}
@@ -2361,7 +2416,12 @@ func (r *layerStore) Diff(from, to string, options *DiffOptions) (io.ReadCloser,
 		}
 		return nil
 	})
-	return maybeCompressReadCloser(rc)
+	diffRC, err := maybeCompressReadCloser(rc)
+	if err != nil {
+		return nil, err
+	}
+	committed = true
+	return diffRC, nil
 }
 
 // Requires startReading or startWriting.

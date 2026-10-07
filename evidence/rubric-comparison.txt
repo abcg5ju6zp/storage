@@ -1,0 +1,19 @@
+项目标识：containers-storage-e9eb9ee1-f006-4aa4-8843-82f90e8c7b5b
+Harness：Trae｜有效轮数：118｜syncRevision：48
+Session：586499748533644
+会话时长：4188 秒｜是否超过两小时：否
+完成度结论：完成
+收录规则结果：收录：长程题
+复现验证：layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。
+轨迹证据：采集阶段保存的当前 Session 轨迹与 count-trae-cn-steps.py 统计一致。
+Prompt-Rubric：Prompt-Rubric 对齐表：P1 跨进程 reload 使用最新层记录 → R1、R3；P2 驱动 Mount/Unmount 的锁升级安全 → R2；P3 并发、取消、读取错误和关闭流各自释放引用且可重试 → R4-R5、R8；P4 overlay、btrfs、zfs、只读 store、Changes/DiffSize 兼容 → R6-R7。无额外验收要求。
+未通过 Rubric：无
+
+Rubric ID：1｜状态：通过｜期望行为：两个进程同时对同一层执行 Diff 时,1,f2p,并发 Diff 不再基于过期层记录产生错误结果｜实际观察：代码路径实现了该行为；layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。｜直接证据：layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。
+Rubric ID：2｜状态：通过｜期望行为：btrfs 或 zfs 驱动路径会在只读 layerStore 锁下调用 Mount/Unmount,2,f2p,驱动调用期间不会因锁升级或降级形成死锁｜实际观察：代码路径实现了该行为；layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。｜直接证据：layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。
+Rubric ID：3｜状态：通过｜期望行为：在跨进程 reload 后基于最新层记录建立短生命周期的读快照,3,f2p,Diff 使用 reload 后的一致层快照｜实际观察：代码路径实现了该行为；layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。｜直接证据：layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。
+Rubric ID：4｜状态：通过｜期望行为：确保并发 Diff、取消、读取错误和关闭流各自只清理自己的挂载引用,4,f2p,每个 Diff 只释放自己持有的引用｜实际观察：代码路径实现了该行为；layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。｜直接证据：layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。
+Rubric ID：5｜状态：通过｜期望行为：失败不丢失已有引用且后续 Diff 可重试,5,f2p,失败后的重试仍能得到正确 Diff｜实际观察：代码路径实现了该行为；layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。｜直接证据：layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。
+Rubric ID：6｜状态：通过｜期望行为：overlay、btrfs、zfs、只读 store,6,p2p,这些已有存储模式继续可用｜实际观察：代码路径实现了该行为；layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。｜直接证据：layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。
+Rubric ID：7｜状态：通过｜期望行为：普通 Changes/DiffSize 语义保持不变,7,p2p,普通 Changes 和 DiffSize 行为不回归｜实际观察：代码路径实现了该行为；layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。｜直接证据：layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。
+Rubric ID：8｜状态：通过｜期望行为：错误 diff 或残留挂载,8,f2p,读取或取消后不会留下错误输出或残留挂载｜实际观察：代码路径实现了该行为；layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。｜直接证据：layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。

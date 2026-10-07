@@ -1,0 +1,25 @@
+rubrics:
+  - id: 1
+    type: f2p
+    text: "两个进程同时对同一层执行 Diff 时,1,f2p,并发 Diff 不再基于过期层记录产生错误结果"
+  - id: 2
+    type: f2p
+    text: "btrfs 或 zfs 驱动路径会在只读 layerStore 锁下调用 Mount/Unmount,2,f2p,驱动调用期间不会因锁升级或降级形成死锁"
+  - id: 3
+    type: f2p
+    text: "在跨进程 reload 后基于最新层记录建立短生命周期的读快照,3,f2p,Diff 使用 reload 后的一致层快照"
+  - id: 4
+    type: f2p
+    text: "确保并发 Diff、取消、读取错误和关闭流各自只清理自己的挂载引用,4,f2p,每个 Diff 只释放自己持有的引用"
+  - id: 5
+    type: f2p
+    text: "失败不丢失已有引用且后续 Diff 可重试,5,f2p,失败后的重试仍能得到正确 Diff"
+  - id: 6
+    type: f2p
+    text: "overlay、btrfs、zfs、只读 store,6,p2p,这些已有存储模式继续可用"
+  - id: 7
+    type: f2p
+    text: "普通 Changes/DiffSize 语义保持不变,7,p2p,普通 Changes 和 DiffSize 行为不回归"
+  - id: 8
+    type: p2p
+    text: "错误 diff 或残留挂载,8,f2p,读取或取消后不会留下错误输出或残留挂载"

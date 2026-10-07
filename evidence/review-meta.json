@@ -1,0 +1,5 @@
+{
+  "completion": "完成",
+  "fails": {},
+  "evidence": "layers.go 的 Diff 快照与 driverBackedFileGetter、pkg/lockfile/lockfile.go 的同步锁；两次 go test -race -count=1 -run TestLayerStoreDiff . 均通过。"
+}

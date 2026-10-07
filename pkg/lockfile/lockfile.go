@@ -185,11 +185,16 @@ func (l *LockFile) AssertLocked() {
 	//
 	// Hence, this “AssertLocked” method, which exists only for sanity checks.
 
-	// Don’t even bother with l.stateMutex: The caller is expected to hold the lock, and in that case l.locked is constant true
-	// with no possible writers.
-	// If the caller does not hold the lock, we are violating the locking/memory model anyway, and accessing the data
-	// without the lock is more efficient for callers, and potentially more visible to lock analysers for incorrect callers.
-	if !l.locked {
+	// Synchronize with lock()/Unlock(): multiple goroutines in the same process can hold a
+	// shared read lock at the same time, and other ones can be acquiring or releasing it
+	// concurrently, so reading l.locked (and l.lockType in AssertLockedForWriting) without
+	// synchronization would be a data race.
+	// Lock ordering is rwMutex, held by every caller, before stateMutex — the same order used
+	// in lock()/Unlock(); stateMutex is never already held on entry here.
+	l.stateMutex.Lock()
+	locked := l.locked
+	l.stateMutex.Unlock()
+	if !locked {
 		panic("internal error: lock is not held by the expected owner")
 	}
 }
@@ -199,8 +204,11 @@ func (l *LockFile) AssertLockedForWriting() {
 	//
 	// The same caveats as for AssertLocked apply equally.
 
-	l.AssertLocked()
-	// Like AssertLocked, don’t even bother with l.stateMutex.
+	l.stateMutex.Lock()
+	defer l.stateMutex.Unlock()
+	if !l.locked {
+		panic("internal error: lock is not held by the expected owner")
+	}
 	if l.lockType == rawfilelock.ReadLock {
 		panic("internal error: lock is not held for writing")
 	}
@@ -248,14 +256,19 @@ func (l *LockFile) Modified() (bool, error) {
 	if !l.locked {
 		panic("attempted to check last-writer in lockfile without locking it first")
 	}
-	defer l.stateMutex.Unlock()
 	oldLW := l.lw
-	// Note that this is called with stateMutex held; that’s fine because ModifiedSince doesn’t need to lock it.
+	l.stateMutex.Unlock()
+	// Note that ModifiedSince() takes l.stateMutex itself (through AssertLocked); all the data
+	// it needs is the on-disk last-write value, so don't hold l.stateMutex across it (and never
+	// call it with l.stateMutex already held, that would deadlock). The caller holds the actual
+	// read/write lock, so no in-process writer can change the on-disk value concurrently.
 	currentLW, modified, err := l.ModifiedSince(oldLW)
 	if err != nil {
 		return true, err
 	}
+	l.stateMutex.Lock()
 	l.lw = currentLW
+	l.stateMutex.Unlock()
 	return modified, nil
 }
 
