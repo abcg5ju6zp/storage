@@ -1,7 +1,5 @@
 {
-  "completion": "部分完成",
-  "fails": {
-    "2": "层索引与镜像索引的统计代际没有检查新建镜像的代际标记；statisticsUnchanged 只检查层字段，刷新后新建镜像保持空的 StatsGeneration。"
-  },
-  "evidence": "stats_refresh.go 的 collect、prepare、publishPrepared、recoverStatisticsSnapshots；两次 go test -race -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。"
+  "completion": "完成",
+  "fails": {},
+  "evidence": "stats_refresh.go 的 statisticsUnchanged 现同时检查层和镜像代际；go test -count=1 -run Test.*(Stats|Refresh|Snapshot) . 通过。"
 }
